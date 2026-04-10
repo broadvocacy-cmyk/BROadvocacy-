@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BROadvocacy AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e2e8f0; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1a1f2e; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .chat-area { height: calc(100vh - 320px); min-height: 300px; }
+    .doc-area { height: calc(100vh - 280px); min-height: 300px; }
+    .sidebar { height: 100vh; }
+    .main-area { height: 100vh; overflow-y: auto; }
+    .analysis-text { white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
+    .chat-bubble { max-width: 85%; }
+    .tab-btn { transition: all 0.15s; }
+    .fade-in { animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .spinner { border: 2px solid #334155; border-top-color: #3b82f6; border-radius: 50%; width: 18px; height: 18px; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .drop-zone { border: 2px dashed #334155; transition: all 0.2s; }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: #3b82f6; background: rgba(59,130,246,0.05); }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+const API = "";
+
+// ── API helpers ────────────────────────────────────────────────────────────
+const api = {
+  get: (path) => fetch(API + path).then(r => r.json()),
+  post: (path, body) => fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
+  patch: (path, body) => fetch(API + path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
+  del: (path) => fetch(API + path, { method: "DELETE" }).then(r => r.json()),
+  upload: (path, file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(API + path, { method: "POST", body: fd }).then(r => r.json());
+  },
+};
+
+// ── Badge component ────────────────────────────────────────────────────────
+const Badge = ({ type }) => {
+  const colors = {
+    email: "bg-blue-900 text-blue-200",
+    fax: "bg-yellow-900 text-yellow-200",
+    research: "bg-green-900 text-green-200",
+    deadline: "bg-red-900 text-red-200",
+    motion: "bg-purple-900 text-purple-200",
+    call: "bg-cyan-900 text-cyan-200",
+    other: "bg-gray-700 text-gray-300",
+  };
+  return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[type] || colors.other}`}>{type}</span>;
+};
+
+// ── Modal ──────────────────────────────────────────────────────────────────
+const Modal = ({ title, onClose, children }) => (
+  <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="bg-slate-800 rounded-xl shadow-2xl w-full max-w-lg border border-slate-700">
+      <div className="flex items-center justify-between p-5 border-b border-slate-700">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">×</button>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  </div>
+);
+
+// ── NewCaseForm ────────────────────────────────────────────────────────────
+const NewCaseForm = ({ onSave, onClose, initial }) => {
+  const [form, setForm] = useState(initial || { name: "", client_name: "", charges: "", jurisdiction: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!form.client_name || !form.charges) return alert("Client name and charges are required.");
+    setSaving(true);
+    await onSave(form);
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-sm text-slate-400 mb-1">Case Label</label>
+        <input className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          placeholder="e.g. Smith Defense — 2024" value={form.name} onChange={e => set("name", e.target.value)} />
+      </div>
+      <div>
+        <label className="block text-sm text-slate-400 mb-1">Client Name *</label>
+        <input className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          placeholder="Full name" value={form.client_name} onChange={e => set("client_name", e.target.value)} />
+      </div>
+      <div>
+        <label className="block text-sm text-slate-400 mb-1">Charges *</label>
+        <input className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          placeholder="e.g. Aggravated assault, possession with intent" value={form.charges} onChange={e => set("charges", e.target.value)} />
+      </div>
+      <div>
+        <label className="block text-sm text-slate-400 mb-1">Jurisdiction</label>
+        <input className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          placeholder="e.g. Harris County, TX / Federal — S.D. Tex." value={form.jurisdiction} onChange={e => set("jurisdiction", e.target.value)} />
+      </div>
+      <div>
+        <label className="block text-sm text-slate-400 mb-1">Initial Notes</label>
+        <textarea className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
+          rows={3} placeholder="Background, key facts, what you know so far..." value={form.notes} onChange={e => set("notes", e.target.value)} />
+      </div>
+      <div className="flex gap-3 pt-2">
+        <button onClick={onClose} className="flex-1 py-2 rounded-lg border border-slate-600 text-sm hover:bg-slate-700 transition">Cancel</button>
+        <button onClick={save} disabled={saving} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-medium transition disabled:opacity-50">
+          {saving ? "Saving..." : "Save Case"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ── Documents Tab ──────────────────────────────────────────────────────────
+const DocumentsTab = ({ caseId }) => {
+  const [docs, setDocs] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [drag, setDrag] = useState(false);
+  const fileRef = useRef();
+
+  useEffect(() => { api.get(`/api/cases/${caseId}/documents`).then(setDocs); }, [caseId]);
+
+  const upload = async (file) => {
+    setUploading(true);
+    try {
+      const doc = await api.upload(`/api/cases/${caseId}/documents`, file);
+      setDocs(prev => [...prev, doc]);
+      setSelected(doc);
+    } catch (e) {
+      alert("Upload failed: " + e.message);
+    }
+    setUploading(false);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault(); setDrag(false);
+    const file = e.dataTransfer.files[0];
+    if (file) upload(file);
+  };
+
+  return (
+    <div className="flex gap-4 h-full">
+      {/* Left: doc list + upload */}
+      <div className="w-72 flex-shrink-0 flex flex-col gap-3">
+        <div className={`drop-zone rounded-xl p-4 text-center cursor-pointer ${drag ? "drag-over" : ""}`}
+          onClick={() => fileRef.current.click()}
+          onDragOver={e => { e.preventDefault(); setDrag(true); }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={onDrop}>
+          <input ref={fileRef} type="file" className="hidden" accept=".pdf,.txt,.doc,.docx"
+            onChange={e => e.target.files[0] && upload(e.target.files[0])} />
+          {uploading
+            ? <div className="flex flex-col items-center gap-2"><div className="spinner" /><p className="text-sm text-blue-400 mt-1">Analyzing document...</p><p className="text-xs text-slate-500">AI is reviewing for issues</p></div>
+            : <div><p className="text-3xl mb-2">📄</p><p className="text-sm font-medium">Upload Document</p><p className="text-xs text-slate-500 mt-1">Police reports, FOIA, court docs, statements<br/>PDF or text files</p></div>
+          }
+        </div>
+
+        <div className="doc-area overflow-y-auto space-y-2">
+          {docs.length === 0 && <p className="text-sm text-slate-500 text-center mt-8">No documents yet.<br/>Upload your first file above.</p>}
+          {docs.map(d => (
+            <div key={d.id} onClick={() => setSelected(d)}
+              className={`p-3 rounded-lg cursor-pointer border transition ${selected?.id === d.id ? "border-blue-500 bg-blue-950/30" : "border-slate-700 bg-slate-800/50 hover:border-slate-600"}`}>
+              <p className="text-sm font-medium truncate">📄 {d.filename}</p>
+              <p className="text-xs text-slate-500 mt-1">{d.created_at?.slice(0, 10)}</p>
+              {d.analysis && <p className="text-xs text-green-400 mt-1">✓ Analyzed</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: analysis */}
+      <div className="flex-1 bg-slate-800/50 rounded-xl border border-slate-700 overflow-y-auto p-5">
+        {!selected
+          ? <div className="flex items-center justify-center h-full text-slate-500">
+              <div className="text-center"><p className="text-4xl mb-3">🔍</p><p>Select a document to see AI analysis</p></div>
+            </div>
+          : <div className="fade-in">
+              <h3 className="font-semibold text-lg mb-1">{selected.filename}</h3>
+              <p className="text-xs text-slate-500 mb-4">Uploaded {selected.created_at?.slice(0, 16)}</p>
+              {selected.analysis
+                ? <div className="analysis-text text-slate-200">{selected.analysis}</div>
+                : <p className="text-slate-500 italic">No analysis available.</p>}
+            </div>
+        }
+      </div>
+    </div>
+  );
+};
+
+// ── Chat Tab ───────────────────────────────────────────────────────────────
+const ChatTab = ({ caseId }) => {
+  const [history, setHistory] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef();
+
+  useEffect(() => { api.get(`/api/cases/${caseId}/chat`).then(setHistory); }, [caseId]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [history, loading]);
+
+  const send = async () => {
+    const msg = input.trim();
+    if (!msg || loading) return;
+    setInput("");
+    setHistory(h => [...h, { role: "user", content: msg }]);
+    setLoading(true);
+    try {
+      const res = await api.post(`/api/cases/${caseId}/chat`, { message: msg });
+      setHistory(h => [...h, { role: "assistant", content: res.response }]);
+    } catch (e) {
+      setHistory(h => [...h, { role: "assistant", content: "⚠️ Error: " + e.message }]);
+    }
+    setLoading(false);
+  };
+
+  const clearChat = async () => {
+    if (!confirm("Clear all chat history for this case?")) return;
+    await api.del(`/api/cases/${caseId}/chat`);
+    setHistory([]);
+  };
+
+  const formatMsg = (text) => text.split('\n').map((line, i) => <span key={i}>{line}{i < text.split('\n').length - 1 && <br/>}</span>);
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex justify-between items-center mb-3">
+        <p className="text-sm text-slate-400">AI has full context of this case + all uploaded documents</p>
+        <button onClick={clearChat} className="text-xs text-slate-500 hover:text-red-400 transition">Clear history</button>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto chat-area space-y-4 mb-4">
+        {history.length === 0 && (
+          <div className="text-center mt-16 text-slate-500">
+            <p className="text-4xl mb-4">⚖️</p>
+            <p className="font-medium text-slate-300 mb-2">BROadvocacy AI is ready</p>
+            <p className="text-sm">Ask anything — strategy, legal research, document questions,<br/>what motions to file, what to look for, what comes next.</p>
+            <div className="mt-6 grid grid-cols-1 gap-2 max-w-md mx-auto text-left">
+              {["What are the strongest defense angles in this case?",
+                "Are there any Miranda or 4th Amendment issues?",
+                "What should we FOIA next?",
+                "Draft a letter to the prosecutor about discovery"].map(s => (
+                <button key={s} onClick={() => setInput(s)}
+                  className="text-left text-xs bg-slate-800 border border-slate-700 hover:border-blue-500 rounded-lg px-3 py-2 transition">
+                  "{s}"
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {history.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} fade-in`}>
+            {msg.role === "assistant" && (
+              <div className="w-8 h-8 rounded-full bg-blue-900 border border-blue-700 flex items-center justify-center text-sm mr-3 flex-shrink-0 mt-1">⚖</div>
+            )}
+            <div className={`chat-bubble rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+              msg.role === "user" ? "bg-blue-700 text-white rounded-tr-sm" : "bg-slate-700 text-slate-100 rounded-tl-sm"}`}>
+              {formatMsg(msg.content)}
+            </div>
+          </div>
+        ))}
+
+        {loading && (
+          <div className="flex justify-start fade-in">
+            <div className="w-8 h-8 rounded-full bg-blue-900 border border-blue-700 flex items-center justify-center text-sm mr-3 flex-shrink-0">⚖</div>
+            <div className="bg-slate-700 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-2">
+              <div className="spinner" /><span className="text-sm text-slate-400">Analyzing case...</span>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div className="flex gap-2">
+        <textarea
+          className="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:border-blue-500"
+          rows={2} placeholder="Ask anything about this case..."
+          value={input} onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
+        <button onClick={send} disabled={loading || !input.trim()}
+          className="px-5 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium text-sm transition disabled:opacity-40">
+          Send
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ── Tasks Tab ──────────────────────────────────────────────────────────────
+const TasksTab = ({ caseId }) => {
+  const [tasks, setTasks] = useState([]);
+  const [form, setForm] = useState({ title: "", type: "other", due_date: "", description: "" });
+  const [adding, setAdding] = useState(false);
+
+  useEffect(() => { api.get(`/api/cases/${caseId}/tasks`).then(setTasks); }, [caseId]);
+
+  const addTask = async () => {
+    if (!form.title) return;
+    setAdding(true);
+    const t = await api.post("/api/tasks", { case_id: caseId, ...form });
+    setTasks(prev => [...prev, { ...t, completed: 0 }]);
+    setForm({ title: "", type: "other", due_date: "", description: "" });
+    setAdding(false);
+  };
+
+  const toggle = async (task) => {
+    await api.patch(`/api/tasks/${task.id}`, { completed: !task.completed });
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: t.completed ? 0 : 1 } : t));
+  };
+
+  const remove = async (id) => {
+    await api.del(`/api/tasks/${id}`);
+    setTasks(prev => prev.filter(t => t.id !== id));
+  };
+
+  const pending = tasks.filter(t => !t.completed);
+  const done = tasks.filter(t => t.completed);
+
+  return (
+    <div className="flex gap-4 h-full">
+      {/* Add task form */}
+      <div className="w-72 flex-shrink-0 space-y-3">
+        <h3 className="font-semibold text-sm text-slate-300">Add Task</h3>
+        <input className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          placeholder="Task title..." value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+          onKeyDown={e => e.key === "Enter" && addTask()} />
+        <select className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+          <option value="other">General</option>
+          <option value="deadline">⏰ Deadline</option>
+          <option value="email">📧 Email</option>
+          <option value="fax">📠 Fax</option>
+          <option value="call">📞 Call</option>
+          <option value="research">🔍 Research</option>
+          <option value="motion">📋 Motion</option>
+        </select>
+        <input type="date" className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
+        <textarea className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-blue-500"
+          rows={2} placeholder="Details (optional)..." value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+        <button onClick={addTask} disabled={adding || !form.title}
+          className="w-full py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition disabled:opacity-40">
+          + Add Task
+        </button>
+
+        <div className="mt-4 pt-4 border-t border-slate-700">
+          <div className="flex gap-3 text-center">
+            <div className="flex-1 bg-slate-800 rounded-lg p-3"><p className="text-2xl font-bold text-white">{pending.length}</p><p className="text-xs text-slate-400">Pending</p></div>
+            <div className="flex-1 bg-slate-800 rounded-lg p-3"><p className="text-2xl font-bold text-green-400">{done.length}</p><p className="text-xs text-slate-400">Done</p></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Task list */}
+      <div className="flex-1 overflow-y-auto doc-area space-y-2">
+        {pending.length === 0 && done.length === 0 && (
+          <div className="text-center mt-16 text-slate-500"><p className="text-4xl mb-3">✅</p><p>No tasks yet. Add your first action item.</p></div>
+        )}
+
+        {pending.map(t => (
+          <div key={t.id} className="flex items-start gap-3 bg-slate-800 border border-slate-700 rounded-xl p-3 fade-in">
+            <input type="checkbox" className="mt-1 accent-blue-500 cursor-pointer" checked={false} onChange={() => toggle(t)} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-medium text-sm">{t.title}</span>
+                <Badge type={t.type} />
+              </div>
+              {t.description && <p className="text-xs text-slate-400 mt-1">{t.description}</p>}
+              {t.due_date && (
+                <p className={`text-xs mt-1 ${new Date(t.due_date) < new Date() ? "text-red-400 font-medium" : "text-slate-400"}`}>
+                  📅 Due {t.due_date}
+                </p>
+              )}
+            </div>
+            <button onClick={() => remove(t.id)} className="text-slate-600 hover:text-red-400 text-lg leading-none transition">×</button>
+          </div>
+        ))}
+
+        {done.length > 0 && (
+          <div className="pt-4">
+            <p className="text-xs text-slate-500 mb-2 px-1">COMPLETED</p>
+            {done.map(t => (
+              <div key={t.id} className="flex items-start gap-3 bg-slate-900 border border-slate-800 rounded-xl p-3 mb-2 opacity-50">
+                <input type="checkbox" className="mt-1 accent-blue-500 cursor-pointer" checked={true} onChange={() => toggle(t)} />
+                <div className="flex-1"><span className="text-sm line-through text-slate-500">{t.title}</span></div>
+                <button onClick={() => remove(t.id)} className="text-slate-600 hover:text-red-400 text-lg leading-none transition">×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── Overview Tab ───────────────────────────────────────────────────────────
+const OverviewTab = ({ caseData, onRefresh }) => {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [brief, setBrief] = useState(null);
+  const [loadingBrief, setLoadingBrief] = useState(false);
+
+  const getBrief = async () => {
+    setLoadingBrief(true);
+    try {
+      const res = await api.get(`/api/cases/${caseData.id}/brief`);
+      setBrief(res.brief);
+    } catch (e) { alert("Failed to generate brief"); }
+    setLoadingBrief(false);
+  };
+
+  const save = async (form) => {
+    setSaving(true);
+    await fetch(`${API}/api/cases/${caseData.id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form)
+    });
+    setSaving(false);
+    setEditing(false);
+    onRefresh();
+  };
+
+  if (editing) return (
+    <div className="max-w-xl">
+      <h3 className="font-semibold mb-4">Edit Case</h3>
+      <NewCaseForm initial={caseData} onSave={save} onClose={() => setEditing(false)} />
+    </div>
+  );
+
+  return (
+    <div className="max-w-3xl space-y-4">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+        <div className="flex justify-between items-start">
+          <div>
+            <h3 className="font-semibold text-xl mb-1">{caseData.client_name}</h3>
+            <p className="text-blue-400 font-medium">{caseData.charges}</p>
+            <p className="text-slate-400 text-sm mt-1">📍 {caseData.jurisdiction || "Jurisdiction not set"}</p>
+          </div>
+          <div className="flex gap-2">
+            <span className={`text-xs px-3 py-1 rounded-full font-medium ${caseData.status === "active" ? "bg-green-900 text-green-300" : "bg-gray-700 text-gray-400"}`}>
+              {caseData.status}
+            </span>
+            <button onClick={() => setEditing(true)} className="text-xs px-3 py-1 rounded-full bg-slate-700 hover:bg-slate-600 transition">Edit</button>
+          </div>
+        </div>
+        {caseData.notes && (
+          <div className="mt-4 pt-4 border-t border-slate-700">
+            <p className="text-xs text-slate-400 mb-2 uppercase tracking-wide">Case Notes</p>
+            <p className="text-sm text-slate-300 whitespace-pre-wrap">{caseData.notes}</p>
+          </div>
+        )}
+        <p className="text-xs text-slate-600 mt-4">Case opened {caseData.created_at?.slice(0, 10)}</p>
+      </div>
+
+      <div className="flex gap-3">
+        <button onClick={getBrief} disabled={loadingBrief}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-sm font-medium transition disabled:opacity-50">
+          {loadingBrief ? <><div className="spinner" /> Generating...</> : "⚖️ Generate Strategic Brief"}
+        </button>
+        <p className="text-xs text-slate-500 self-center">AI analyzes all documents and builds a full defense strategy</p>
+      </div>
+
+      {brief && (
+        <div className="bg-slate-800 border border-indigo-800 rounded-xl p-5 fade-in">
+          <div className="flex justify-between mb-3">
+            <h4 className="font-semibold text-indigo-300">Strategic Brief</h4>
+            <button onClick={() => setBrief(null)} className="text-slate-500 hover:text-slate-300 text-sm">Close</button>
+          </div>
+          <div className="analysis-text text-slate-200">{brief}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+const Sidebar = ({ cases, selectedId, onSelect, onNew }) => (
+  <div className="sidebar w-64 flex-shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col">
+    <div className="p-5 border-b border-slate-800">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-2xl">⚖️</span>
+        <span className="font-bold text-lg tracking-tight">BROadvocacy</span>
+      </div>
+      <p className="text-xs text-slate-500">AI Advocacy Platform</p>
+    </div>
+
+    <div className="p-3">
+      <button onClick={onNew}
+        className="w-full py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition flex items-center justify-center gap-1">
+        + New Case
+      </button>
+    </div>
+
+    <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
+      {cases.length === 0 && <p className="text-xs text-slate-600 text-center mt-6 px-2">No cases yet.<br/>Add your first case above.</p>}
+      {cases.map(c => (
+        <div key={c.id} onClick={() => onSelect(c.id)}
+          className={`p-3 rounded-lg cursor-pointer transition ${selectedId === c.id ? "bg-blue-900/40 border border-blue-800" : "hover:bg-slate-800 border border-transparent"}`}>
+          <p className="font-medium text-sm truncate">{c.client_name}</p>
+          <p className="text-xs text-slate-500 truncate mt-0.5">{c.charges}</p>
+          <div className="flex gap-1.5 mt-1.5 items-center">
+            <span className={`w-1.5 h-1.5 rounded-full ${c.status === "active" ? "bg-green-400" : "bg-gray-500"}`} />
+            <span className="text-xs text-slate-600">{c.created_at?.slice(0, 10)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <div className="p-4 border-t border-slate-800 text-xs text-slate-600 text-center">
+      Every detail matters.<br/>Every person deserves a voice.
+    </div>
+  </div>
+);
+
+// ── Main App ───────────────────────────────────────────────────────────────
+const App = () => {
+  const [cases, setCases] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [caseData, setCaseData] = useState(null);
+  const [tab, setTab] = useState("overview");
+  const [showNew, setShowNew] = useState(false);
+
+  useEffect(() => { api.get("/api/cases").then(setCases); }, []);
+
+  useEffect(() => {
+    if (selectedId) {
+      api.get(`/api/cases/${selectedId}`).then(setCaseData);
+      setTab("overview");
+    }
+  }, [selectedId]);
+
+  const createCase = async (form) => {
+    const c = await api.post("/api/cases", form);
+    setCases(prev => [c, ...prev]);
+    setSelectedId(c.id);
+  };
+
+  const refreshCase = () => {
+    api.get("/api/cases").then(setCases);
+    if (selectedId) api.get(`/api/cases/${selectedId}`).then(setCaseData);
+  };
+
+  const tabs = [
+    { key: "overview", label: "Overview" },
+    { key: "documents", label: "Documents" },
+    { key: "strategy", label: "Strategy Chat" },
+    { key: "tasks", label: "Tasks" },
+  ];
+
+  return (
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar cases={cases} selectedId={selectedId} onSelect={setSelectedId} onNew={() => setShowNew(true)} />
+
+      <div className="flex-1 flex flex-col main-area">
+        {!selectedId ? (
+          <div className="flex-1 flex items-center justify-center text-center text-slate-500 p-8">
+            <div>
+              <p className="text-6xl mb-6">⚖️</p>
+              <h2 className="text-2xl font-bold text-white mb-3">BROadvocacy AI</h2>
+              <p className="text-slate-400 max-w-md mb-2">Your AI co-counsel for criminal defense advocacy.</p>
+              <p className="text-slate-500 max-w-md text-sm mb-8">
+                Upload police reports, FOIA responses, court documents, and statements.
+                The AI analyzes everything — flags issues, spots inconsistencies, and helps build strategy.
+              </p>
+              <button onClick={() => setShowNew(true)}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium transition">
+                + Open Your First Case
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Case header */}
+            <div className="px-6 pt-5 pb-0 border-b border-slate-800">
+              {caseData && (
+                <div className="mb-4">
+                  <h1 className="text-xl font-bold">{caseData.client_name}</h1>
+                  <p className="text-sm text-slate-400">{caseData.charges} {caseData.jurisdiction ? `· ${caseData.jurisdiction}` : ""}</p>
+                </div>
+              )}
+              <div className="flex gap-1">
+                {tabs.map(t => (
+                  <button key={t.key} onClick={() => setTab(t.key)}
+                    className={`tab-btn px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 ${tab === t.key ? "border-blue-500 text-blue-400" : "border-transparent text-slate-400 hover:text-white"}`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 p-6 overflow-hidden">
+              {tab === "overview" && caseData && <OverviewTab caseData={caseData} onRefresh={refreshCase} />}
+              {tab === "documents" && <DocumentsTab caseId={selectedId} />}
+              {tab === "strategy" && <ChatTab caseId={selectedId} />}
+              {tab === "tasks" && <TasksTab caseId={selectedId} />}
+            </div>
+          </>
+        )}
+      </div>
+
+      {showNew && (
+        <Modal title="New Case" onClose={() => setShowNew(false)}>
+          <NewCaseForm onSave={createCase} onClose={() => setShowNew(false)} />
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
