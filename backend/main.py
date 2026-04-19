@@ -14,7 +14,7 @@ from typing import Optional
 import uvicorn
 
 from database import db
-from ai_engine import analyze_document, chat_with_ai, generate_case_brief
+from ai_engine import analyze_document, chat_with_ai, generate_case_brief, extract_case_map
 
 app = FastAPI(title="BROadvocacy AI")
 
@@ -86,6 +86,22 @@ def update_case(case_id: int, data: CaseUpdate):
         raise HTTPException(status_code=404, detail="Case not found")
     db.update_case(case_id, data.dict())
     return db.get_case(case_id)
+
+@app.get("/api/cases/{case_id}/map")
+def get_case_map(case_id: int):
+    cached = db.get_case_map(case_id)
+    if cached:
+        return cached
+    return {"data": None, "created_at": None}
+
+@app.post("/api/cases/{case_id}/map")
+def build_case_map(case_id: int):
+    context = db.get_case_context(case_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="Case not found")
+    result = extract_case_map(context)
+    db.save_case_map(case_id, result)
+    return {"data": result, "created_at": "now"}
 
 @app.get("/api/cases/{case_id}/brief")
 def get_brief(case_id: int):

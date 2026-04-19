@@ -54,6 +54,14 @@ class Database:
                     created_at TEXT DEFAULT (datetime('now')),
                     FOREIGN KEY (case_id) REFERENCES cases(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS case_maps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    case_id INTEGER NOT NULL UNIQUE,
+                    data TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    FOREIGN KEY (case_id) REFERENCES cases(id)
+                );
             """)
 
     # ── Cases ──────────────────────────────────────────────────────────────
@@ -186,6 +194,28 @@ class Database:
     def delete_task(self, task_id):
         with self._conn() as conn:
             conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+
+    # ── Case Maps ──────────────────────────────────────────────────────────
+
+    def save_case_map(self, case_id, data: dict):
+        import json
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO case_maps (case_id, data, created_at)
+                   VALUES (?, ?, datetime('now'))
+                   ON CONFLICT(case_id) DO UPDATE SET data=excluded.data, created_at=excluded.created_at""",
+                (case_id, json.dumps(data)),
+            )
+
+    def get_case_map(self, case_id):
+        import json
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT data, created_at FROM case_maps WHERE case_id=?", (case_id,)
+            ).fetchone()
+            if not row:
+                return None
+            return {"data": json.loads(row["data"]), "created_at": row["created_at"]}
 
 
 db = Database()

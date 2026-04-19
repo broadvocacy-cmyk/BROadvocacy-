@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import anthropic
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -185,3 +187,123 @@ def _guess_doc_type(filename: str) -> str:
     if "medical" in name:
         return "Medical Record"
     return "Legal Document"
+
+
+def extract_case_map(case_context: dict) -> dict:
+    """Build a structured timeline + connections map from all case documents."""
+    docs = case_context.get("documents", [])
+    if not docs:
+        return _empty_map()
+
+    all_content = "\n\n".join(
+        f"=== DOCUMENT: {d['filename']} ===\n{d.get('analysis', 'No analysis available')}"
+        for d in docs
+    )
+
+    prompt = f"""Build a comprehensive case map for:
+Client: {case_context.get('client_name')}
+Charges: {case_context.get('charges')}
+Jurisdiction: {case_context.get('jurisdiction')}
+Case Notes: {case_context.get('notes') or 'None'}
+
+ANALYZED DOCUMENTS:
+{all_content}
+
+Extract EVERY person, date, event, location, contradiction, and rights violation.
+Return ONLY valid JSON — no markdown, no explanation, just the JSON object:
+
+{{
+  "timeline": [
+    {{
+      "date": "YYYY-MM-DD or best estimate or 'Unknown'",
+      "time": "HH:MM or 'Unknown'",
+      "event": "Clear, specific description of what happened",
+      "source": "exact filename",
+      "people": ["Full Name", "..."],
+      "location": "specific location or null",
+      "flag": "contradiction|gap|violation|key_fact|null",
+      "flag_note": "specific explanation if flagged, otherwise null"
+    }}
+  ],
+  "people": [
+    {{
+      "name": "Full name",
+      "role": "Officer / Witness / Defendant / Victim / Informant / Attorney / etc",
+      "identifier": "Badge number, employee ID, DOB, or other identifier",
+      "documents": ["filename1"],
+      "notes": "Anything notable: inconsistencies, role conflicts, missing statements"
+    }}
+  ],
+  "contradictions": [
+    {{
+      "title": "Short title (e.g. 'Arrival Time Discrepancy')",
+      "description": "Exact details — what document A says vs what document B says, with specifics",
+      "doc_a": "filename",
+      "claim_a": "exact claim from doc A",
+      "doc_b": "filename",
+      "claim_b": "exact claim from doc B",
+      "severity": "HIGH|MEDIUM|LOW",
+      "legal_significance": "Why this matters — what motion or argument it supports"
+    }}
+  ],
+  "rights_violations": [
+    {{
+      "right": "Specific right (e.g. '4th Amendment — Unreasonable Search', 'Miranda', '6th Amendment — Right to Counsel')",
+      "description": "What happened that violated this right, with specific facts",
+      "source": "filename",
+      "strength": "STRONG|MODERATE|WEAK",
+      "remedy": "Motion to suppress / Dismissal / Habeas / etc"
+    }}
+  ],
+  "missing_elements": [
+    "Specific document, recording, or record that should exist but is absent or unaccounted for"
+  ],
+  "key_questions": [
+    "Specific unanswered question with investigative urgency"
+  ],
+  "connections": [
+    {{
+      "from": "Person or Event A",
+      "to": "Person or Event B",
+      "relationship": "Brief description of the connection"
+    }}
+  ]
+}}
+
+Be exhaustive. Sort timeline chronologically. Every detail matters — this is someone's freedom."""
+
+    response = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=6000,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    raw = response.content[0].text.strip()
+    # Strip markdown code fences if present
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Try to extract JSON object from response
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except Exception:
+                pass
+        return {**_empty_map(), "error": "Could not parse AI response. Try refreshing."}
+
+
+def _empty_map() -> dict:
+    return {
+        "timeline": [],
+        "people": [],
+        "contradictions": [],
+        "rights_violations": [],
+        "missing_elements": [],
+        "key_questions": [],
+        "connections": [],
+    }

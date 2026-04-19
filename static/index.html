@@ -411,6 +411,255 @@ const TasksTab = ({ caseId }) => {
   );
 };
 
+// ── Timeline Tab ───────────────────────────────────────────────────────────
+const flagStyles = {
+  contradiction: { border: "border-red-600", bg: "bg-red-950/30", dot: "bg-red-500", label: "CONTRADICTION" },
+  violation:     { border: "border-orange-600", bg: "bg-orange-950/30", dot: "bg-orange-500", label: "RIGHTS VIOLATION" },
+  gap:           { border: "border-yellow-600", bg: "bg-yellow-950/20", dot: "bg-yellow-500", label: "GAP" },
+  key_fact:      { border: "border-blue-500", bg: "bg-blue-950/20", dot: "bg-blue-400", label: "KEY FACT" },
+};
+
+const SeverityBadge = ({ s }) => {
+  const c = { HIGH: "bg-red-900 text-red-200", MODERATE: "bg-yellow-900 text-yellow-200", MEDIUM: "bg-yellow-900 text-yellow-200", STRONG: "bg-green-900 text-green-200", WEAK: "bg-gray-700 text-gray-400", LOW: "bg-gray-700 text-gray-400" };
+  return <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${c[s] || c.LOW}`}>{s}</span>;
+};
+
+const TimelineTab = ({ caseId }) => {
+  const [mapData, setMapData] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [activeSection, setActiveSection] = useState("timeline");
+
+  useEffect(() => {
+    api.get(`/api/cases/${caseId}/map`).then(res => {
+      if (res.data) { setMapData(res.data); setUpdatedAt(res.created_at); }
+    });
+  }, [caseId]);
+
+  const build = async () => {
+    setLoading(true);
+    try {
+      const res = await api.post(`/api/cases/${caseId}/map`, {});
+      setMapData(res.data);
+      setUpdatedAt(new Date().toISOString());
+    } catch(e) { alert("Error building map: " + e.message); }
+    setLoading(false);
+  };
+
+  const sections = [
+    { key: "timeline", label: "Timeline", icon: "📅", count: mapData?.timeline?.length },
+    { key: "people", label: "People", icon: "👤", count: mapData?.people?.length },
+    { key: "contradictions", label: "Contradictions", icon: "⚠️", count: mapData?.contradictions?.length },
+    { key: "violations", label: "Rights Violations", icon: "🚨", count: mapData?.rights_violations?.length },
+    { key: "missing", label: "Missing Evidence", icon: "❓", count: mapData?.missing_elements?.length },
+    { key: "questions", label: "Key Questions", icon: "🔍", count: mapData?.key_questions?.length },
+  ];
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+        <div>
+          <h3 className="font-semibold">Case Map & Timeline</h3>
+          <p className="text-xs text-slate-500">
+            {updatedAt ? `Last built ${updatedAt.slice(0,16).replace('T',' ')}` : "Not yet generated — click Build to analyze all documents"}
+          </p>
+        </div>
+        <button onClick={build} disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-sm font-medium transition disabled:opacity-50">
+          {loading ? <><div className="spinner"/> Building map...</> : (mapData ? "🔄 Rebuild Map" : "🗺️ Build Case Map")}
+        </button>
+      </div>
+
+      {!mapData && !loading && (
+        <div className="flex-1 flex items-center justify-center text-slate-500">
+          <div className="text-center max-w-md">
+            <p className="text-5xl mb-4">🗺️</p>
+            <p className="font-semibold text-slate-300 mb-2">Build your Case Map</p>
+            <p className="text-sm">The AI will read every uploaded document and extract all people, dates, events, contradictions, rights violations, and missing elements — organized into one view.</p>
+            <button onClick={build} className="mt-6 px-6 py-3 bg-indigo-700 hover:bg-indigo-600 rounded-xl font-medium transition">
+              🗺️ Build Case Map
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex-1 flex items-center justify-center text-slate-500">
+          <div className="text-center">
+            <div className="spinner" style={{width:40,height:40,borderWidth:3,margin:'0 auto 20px'}}/>
+            <p className="font-medium text-slate-300">Analyzing all documents...</p>
+            <p className="text-sm mt-1">Extracting events, people, contradictions, and rights violations</p>
+            <p className="text-xs text-slate-600 mt-3">This takes 30–60 seconds for complex cases</p>
+          </div>
+        </div>
+      )}
+
+      {mapData && !loading && (
+        <div className="flex gap-4 flex-1 overflow-hidden">
+          {/* Section nav */}
+          <div className="w-44 flex-shrink-0 space-y-1">
+            {sections.map(s => (
+              <button key={s.key} onClick={() => setActiveSection(s.key)}
+                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition flex items-center justify-between ${activeSection === s.key ? "bg-indigo-900/50 border border-indigo-700 text-white" : "hover:bg-slate-800 text-slate-400"}`}>
+                <span>{s.icon} {s.label}</span>
+                {s.count > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${s.key === 'contradictions' || s.key === 'violations' ? 'bg-red-900 text-red-300' : 'bg-slate-700 text-slate-300'}`}>{s.count}</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+
+            {/* TIMELINE */}
+            {activeSection === "timeline" && (
+              <div className="space-y-2 fade-in">
+                {mapData.timeline?.length === 0 && <p className="text-slate-500 text-sm text-center mt-8">No timeline events extracted.</p>}
+                {mapData.timeline?.map((ev, i) => {
+                  const fs = flagStyles[ev.flag] || {};
+                  return (
+                    <div key={i} className={`relative pl-8 fade-in`}>
+                      {/* Timeline line */}
+                      {i < mapData.timeline.length - 1 && <div className="absolute left-3 top-6 bottom-0 w-px bg-slate-700" />}
+                      {/* Dot */}
+                      <div className={`absolute left-1.5 top-3 w-3 h-3 rounded-full border-2 border-slate-900 ${ev.flag ? (fs.dot || 'bg-slate-500') : 'bg-slate-600'}`} />
+                      <div className={`rounded-xl border p-3 ${ev.flag ? `${fs.border} ${fs.bg}` : 'border-slate-700 bg-slate-800/50'}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="text-xs font-mono text-slate-400">{ev.date}{ev.time && ev.time !== 'Unknown' ? ` · ${ev.time}` : ''}</span>
+                              {ev.flag && <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${ev.flag === 'contradiction' ? 'bg-red-900 text-red-300' : ev.flag === 'violation' ? 'bg-orange-900 text-orange-300' : ev.flag === 'gap' ? 'bg-yellow-900 text-yellow-300' : 'bg-blue-900 text-blue-300'}`}>{fs.label}</span>}
+                            </div>
+                            <p className="text-sm font-medium">{ev.event}</p>
+                            {ev.flag_note && <p className="text-xs text-red-300 mt-1 italic">⚠ {ev.flag_note}</p>}
+                            <div className="flex gap-3 mt-2 flex-wrap">
+                              {ev.location && <span className="text-xs text-slate-400">📍 {ev.location}</span>}
+                              {ev.people?.length > 0 && <span className="text-xs text-slate-400">👤 {ev.people.join(', ')}</span>}
+                              {ev.source && <span className="text-xs text-slate-600">📄 {ev.source}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* PEOPLE */}
+            {activeSection === "people" && (
+              <div className="grid grid-cols-1 gap-3 fade-in">
+                {mapData.people?.length === 0 && <p className="text-slate-500 text-sm text-center mt-8">No people extracted.</p>}
+                {mapData.people?.map((p, i) => (
+                  <div key={i} className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-semibold">{p.name}</p>
+                        <p className="text-sm text-blue-400">{p.role}</p>
+                        {p.identifier && <p className="text-xs text-slate-500 mt-0.5">ID: {p.identifier}</p>}
+                      </div>
+                    </div>
+                    {p.notes && <p className="text-xs text-slate-300 mt-2 bg-slate-900 rounded-lg p-2">{p.notes}</p>}
+                    {p.documents?.length > 0 && (
+                      <div className="mt-2 flex gap-1 flex-wrap">
+                        {p.documents.map((d,j) => <span key={j} className="text-xs bg-slate-700 text-slate-400 px-2 py-0.5 rounded">📄 {d}</span>)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* CONTRADICTIONS */}
+            {activeSection === "contradictions" && (
+              <div className="space-y-3 fade-in">
+                {mapData.contradictions?.length === 0 && <p className="text-slate-500 text-sm text-center mt-8">No contradictions found.</p>}
+                {mapData.contradictions?.map((c, i) => (
+                  <div key={i} className="bg-red-950/30 border border-red-800 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-semibold text-red-300">⚠️ {c.title}</p>
+                      <SeverityBadge s={c.severity} />
+                    </div>
+                    <p className="text-sm text-slate-300 mb-3">{c.description}</p>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      <div className="bg-slate-900/50 rounded-lg p-2">
+                        <p className="text-xs text-slate-500 mb-1">📄 {c.doc_a}</p>
+                        <p className="text-xs text-slate-300">"{c.claim_a}"</p>
+                      </div>
+                      <div className="bg-slate-900/50 rounded-lg p-2">
+                        <p className="text-xs text-slate-500 mb-1">📄 {c.doc_b}</p>
+                        <p className="text-xs text-slate-300">"{c.claim_b}"</p>
+                      </div>
+                    </div>
+                    {c.legal_significance && (
+                      <div className="bg-blue-950/40 border border-blue-800 rounded-lg p-2">
+                        <p className="text-xs text-blue-300">⚖️ {c.legal_significance}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* RIGHTS VIOLATIONS */}
+            {activeSection === "violations" && (
+              <div className="space-y-3 fade-in">
+                {mapData.rights_violations?.length === 0 && <p className="text-slate-500 text-sm text-center mt-8">No rights violations identified.</p>}
+                {mapData.rights_violations?.map((v, i) => (
+                  <div key={i} className="bg-orange-950/30 border border-orange-800 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="font-semibold text-orange-300">🚨 {v.right}</p>
+                      <SeverityBadge s={v.strength} />
+                    </div>
+                    <p className="text-sm text-slate-300 mb-2">{v.description}</p>
+                    <div className="flex gap-3 flex-wrap">
+                      {v.source && <span className="text-xs text-slate-500">📄 {v.source}</span>}
+                      {v.remedy && <span className="text-xs bg-green-900/50 text-green-300 px-2 py-0.5 rounded-full">Remedy: {v.remedy}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* MISSING ELEMENTS */}
+            {activeSection === "missing" && (
+              <div className="space-y-2 fade-in">
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 mb-3">
+                  <p className="text-xs text-slate-400">These records or items should exist but are missing from what's been provided. Each one is a potential Brady violation or discovery demand.</p>
+                </div>
+                {mapData.missing_elements?.length === 0 && <p className="text-slate-500 text-sm text-center mt-8">No missing elements identified.</p>}
+                {mapData.missing_elements?.map((m, i) => (
+                  <div key={i} className="flex items-start gap-3 bg-yellow-950/20 border border-yellow-800/50 rounded-xl p-3">
+                    <span className="text-yellow-500 mt-0.5 flex-shrink-0">❓</span>
+                    <p className="text-sm text-slate-300">{m}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* KEY QUESTIONS */}
+            {activeSection === "questions" && (
+              <div className="space-y-2 fade-in">
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 mb-3">
+                  <p className="text-xs text-slate-400">Unanswered questions the AI flagged as high priority for investigation.</p>
+                </div>
+                {mapData.key_questions?.length === 0 && <p className="text-slate-500 text-sm text-center mt-8">No key questions extracted.</p>}
+                {mapData.key_questions?.map((q, i) => (
+                  <div key={i} className="flex items-start gap-3 bg-indigo-950/20 border border-indigo-800/50 rounded-xl p-3">
+                    <span className="text-indigo-400 mt-0.5 flex-shrink-0">🔍</span>
+                    <p className="text-sm text-slate-300">{q}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Overview Tab ───────────────────────────────────────────────────────────
 const OverviewTab = ({ caseData, onRefresh }) => {
   const [editing, setEditing] = useState(false);
@@ -560,6 +809,7 @@ const App = () => {
   const tabs = [
     { key: "overview", label: "Overview" },
     { key: "documents", label: "Documents" },
+    { key: "timeline", label: "🗺️ Case Map" },
     { key: "strategy", label: "Strategy Chat" },
     { key: "tasks", label: "Tasks" },
   ];
@@ -609,6 +859,7 @@ const App = () => {
             <div className="flex-1 p-6 overflow-hidden">
               {tab === "overview" && caseData && <OverviewTab caseData={caseData} onRefresh={refreshCase} />}
               {tab === "documents" && <DocumentsTab caseId={selectedId} />}
+              {tab === "timeline" && <TimelineTab caseId={selectedId} />}
               {tab === "strategy" && <ChatTab caseId={selectedId} />}
               {tab === "tasks" && <TasksTab caseId={selectedId} />}
             </div>
