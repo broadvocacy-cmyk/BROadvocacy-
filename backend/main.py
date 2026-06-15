@@ -1,5 +1,6 @@
 import os
 import io
+from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -30,7 +31,7 @@ UPLOADS_DIR = Path(__file__).parent.parent / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 
-# ── Models ─────────────────────────────────────────────────────────────────
+# ── Models ─────────────────────────────────────────────────────────────────────────
 
 class CaseCreate(BaseModel):
     name: str
@@ -62,7 +63,7 @@ class TaskUpdate(BaseModel):
     title: Optional[str] = None
 
 
-# ── Cases ──────────────────────────────────────────────────────────────────
+# ── Cases ────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/cases")
 def list_cases():
@@ -112,7 +113,7 @@ def get_brief(case_id: int):
     return {"brief": brief}
 
 
-# ── Documents ──────────────────────────────────────────────────────────────
+# ── Documents ───────────────────────────────────────────────────────────────────────
 
 @app.get("/api/cases/{case_id}/documents")
 def list_documents(case_id: int):
@@ -135,6 +136,7 @@ async def upload_document(case_id: int, file: UploadFile = File(...)):
         "id": doc_id,
         "filename": file.filename,
         "analysis": analysis,
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
 @app.get("/api/documents/{doc_id}")
@@ -145,7 +147,7 @@ def get_document(doc_id: int):
     return doc
 
 
-# ── Chat ───────────────────────────────────────────────────────────────────
+# ── Chat ──────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/cases/{case_id}/chat")
 def get_chat(case_id: int):
@@ -168,7 +170,7 @@ def clear_chat(case_id: int):
     return {"success": True}
 
 
-# ── Tasks ──────────────────────────────────────────────────────────────────
+# ── Tasks ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/cases/{case_id}/tasks")
 def list_tasks(case_id: int):
@@ -190,7 +192,7 @@ def delete_task(task_id: int):
     return {"success": True}
 
 
-# ── Frontend ───────────────────────────────────────────────────────────────
+# ── Frontend ──────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def serve_index():
@@ -200,7 +202,7 @@ def serve_index():
     return HTMLResponse("<h1>BROadvocacy AI — frontend not found</h1>")
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────────
 
 def _extract_text(content: bytes, filename: str) -> str:
     name = (filename or "").lower()
