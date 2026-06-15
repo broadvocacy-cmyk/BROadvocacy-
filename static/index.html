@@ -4,13 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BROadvocacy AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e2e8f0; }
+    body { margin: 0; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; background: #0f1117; color: #e2e8f0; font-size: 15px; line-height: 1.5; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: #1a1f2e; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
@@ -18,7 +21,7 @@
     .doc-area { height: calc(100vh - 280px); min-height: 300px; }
     .sidebar { height: 100vh; }
     .main-area { height: 100vh; overflow-y: auto; }
-    .analysis-text { white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
+    .analysis-text { white-space: pre-wrap; font-size: 14px; line-height: 1.7; }
     .chat-bubble { max-width: 85%; }
     .tab-btn { transition: all 0.15s; }
     .fade-in { animation: fadeIn 0.2s ease; }
@@ -36,20 +39,26 @@
 const { useState, useEffect, useRef, useCallback } = React;
 const API = "";
 
-// ── API helpers ────────────────────────────────────────────────────────────
+// ── API helpers ──────────────────────────────────────────────────────────
+const checkOk = async (r) => {
+  if (r.ok) return r.json();
+  const err = await r.json().catch(() => ({}));
+  throw new Error(err.detail || `Server error ${r.status}`);
+};
+
 const api = {
-  get: (path) => fetch(API + path).then(r => r.json()),
-  post: (path, body) => fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
-  patch: (path, body) => fetch(API + path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()),
-  del: (path) => fetch(API + path, { method: "DELETE" }).then(r => r.json()),
+  get: (path) => fetch(API + path).then(checkOk),
+  post: (path, body) => fetch(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(checkOk),
+  patch: (path, body) => fetch(API + path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(checkOk),
+  del: (path) => fetch(API + path, { method: "DELETE" }).then(checkOk),
   upload: (path, file) => {
     const fd = new FormData();
     fd.append("file", file);
-    return fetch(API + path, { method: "POST", body: fd }).then(r => r.json());
+    return fetch(API + path, { method: "POST", body: fd }).then(checkOk);
   },
 };
 
-// ── Badge component ────────────────────────────────────────────────────────
+// ── Badge component ──────────────────────────────────────────────────────
 const Badge = ({ type }) => {
   const colors = {
     email: "bg-blue-900 text-blue-200",
@@ -76,7 +85,7 @@ const Modal = ({ title, onClose, children }) => (
   </div>
 );
 
-// ── NewCaseForm ────────────────────────────────────────────────────────────
+// ── NewCaseForm ──────────────────────────────────────────────────────────────
 const NewCaseForm = ({ onSave, onClose, initial }) => {
   const [form, setForm] = useState(initial || { name: "", client_name: "", charges: "", jurisdiction: "", notes: "" });
   const [saving, setSaving] = useState(false);
@@ -131,6 +140,7 @@ const NewCaseForm = ({ onSave, onClose, initial }) => {
 const DocumentsTab = ({ caseId }) => {
   const [docs, setDocs] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
   const [selected, setSelected] = useState(null);
   const [drag, setDrag] = useState(false);
   const fileRef = useRef();
@@ -139,12 +149,14 @@ const DocumentsTab = ({ caseId }) => {
 
   const upload = async (file) => {
     setUploading(true);
+    setUploadError(null);
     try {
-      const doc = await api.upload(`/api/cases/${caseId}/documents`, file);
+      const result = await api.upload(`/api/cases/${caseId}/documents`, file);
+      const doc = { ...result, created_at: result.created_at || new Date().toISOString() };
       setDocs(prev => [...prev, doc]);
       setSelected(doc);
     } catch (e) {
-      alert("Upload failed: " + e.message);
+      setUploadError(e.message || "Upload failed. Make sure the file is a valid PDF or plain text file.");
     }
     setUploading(false);
   };
@@ -164,13 +176,19 @@ const DocumentsTab = ({ caseId }) => {
           onDragOver={e => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
           onDrop={onDrop}>
-          <input ref={fileRef} type="file" className="hidden" accept=".pdf,.txt,.doc,.docx"
-            onChange={e => e.target.files[0] && upload(e.target.files[0])} />
+          <input ref={fileRef} type="file" className="hidden" accept=".pdf,.txt"
+            onChange={e => { setUploadError(null); e.target.files[0] && upload(e.target.files[0]); }} />
           {uploading
-            ? <div className="flex flex-col items-center gap-2"><div className="spinner" /><p className="text-sm text-blue-400 mt-1">Analyzing document...</p><p className="text-xs text-slate-500">AI is reviewing for issues</p></div>
-            : <div><p className="text-3xl mb-2">📄</p><p className="text-sm font-medium">Upload Document</p><p className="text-xs text-slate-500 mt-1">Police reports, FOIA, court docs, statements<br/>PDF or text files</p></div>
+            ? <div className="flex flex-col items-center gap-2"><div className="spinner" /><p className="text-sm text-blue-400 mt-1">Scanning document...</p><p className="text-xs text-slate-500">AI is reviewing for issues</p></div>
+            : <div><p className="text-3xl mb-2">📄</p><p className="text-sm font-medium">Upload Document</p><p className="text-xs text-slate-500 mt-1">Police reports, FOIA responses, court docs, statements<br/>Accepted: PDF or plain text (.pdf, .txt)</p></div>
           }
         </div>
+
+        {uploadError && (
+          <div className="bg-red-950/40 border border-red-800 rounded-lg p-3 text-xs text-red-300">
+            ⚠️ {uploadError}
+          </div>
+        )}
 
         <div className="doc-area overflow-y-auto space-y-2">
           {docs.length === 0 && <p className="text-sm text-slate-500 text-center mt-8">No documents yet.<br/>Upload your first file above.</p>}
@@ -189,11 +207,11 @@ const DocumentsTab = ({ caseId }) => {
       <div className="flex-1 bg-slate-800/50 rounded-xl border border-slate-700 overflow-y-auto p-5">
         {!selected
           ? <div className="flex items-center justify-center h-full text-slate-500">
-              <div className="text-center"><p className="text-4xl mb-3">🔍</p><p>Select a document to see AI analysis</p></div>
+              <div className="text-center"><p className="text-4xl mb-3">🔍</p><p>Select a document to view the AI analysis</p></div>
             </div>
           : <div className="fade-in">
               <h3 className="font-semibold text-lg mb-1">{selected.filename}</h3>
-              <p className="text-xs text-slate-500 mb-4">Uploaded {selected.created_at?.slice(0, 16)}</p>
+              <p className="text-xs text-slate-500 mb-4">Uploaded {selected.created_at?.slice(0, 16)?.replace('T', ' ')}</p>
               {selected.analysis
                 ? <div className="analysis-text text-slate-200">{selected.analysis}</div>
                 : <p className="text-slate-500 italic">No analysis available.</p>}
@@ -204,7 +222,7 @@ const DocumentsTab = ({ caseId }) => {
   );
 };
 
-// ── Chat Tab ───────────────────────────────────────────────────────────────
+// ── Chat Tab ───────────────────────────────────────────────────────────────────
 const ChatTab = ({ caseId }) => {
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState("");
@@ -240,7 +258,7 @@ const ChatTab = ({ caseId }) => {
   return (
     <div className="flex flex-col h-full">
       <div className="flex justify-between items-center mb-3">
-        <p className="text-sm text-slate-400">AI has full context of this case + all uploaded documents</p>
+        <p className="text-sm text-slate-400">AI has full context of this case and all uploaded documents</p>
         <button onClick={clearChat} className="text-xs text-slate-500 hover:text-red-400 transition">Clear history</button>
       </div>
 
@@ -249,7 +267,7 @@ const ChatTab = ({ caseId }) => {
         {history.length === 0 && (
           <div className="text-center mt-16 text-slate-500">
             <p className="text-4xl mb-4">⚖️</p>
-            <p className="font-medium text-slate-300 mb-2">BROadvocacy AI is ready</p>
+            <p className="font-semibold text-slate-300 mb-2">BROadvocacy AI is ready</p>
             <p className="text-sm">Ask anything — strategy, legal research, document questions,<br/>what motions to file, what to look for, what comes next.</p>
             <div className="mt-6 grid grid-cols-1 gap-2 max-w-md mx-auto text-left">
               {["What are the strongest defense angles in this case?",
@@ -304,7 +322,7 @@ const ChatTab = ({ caseId }) => {
   );
 };
 
-// ── Tasks Tab ──────────────────────────────────────────────────────────────
+// ── Tasks Tab ──────────────────────────────────────────────────────────────────
 const TasksTab = ({ caseId }) => {
   const [tasks, setTasks] = useState([]);
   const [form, setForm] = useState({ title: "", type: "other", due_date: "", description: "" });
@@ -411,7 +429,7 @@ const TasksTab = ({ caseId }) => {
   );
 };
 
-// ── Timeline Tab ───────────────────────────────────────────────────────────
+// ── Timeline Tab ───────────────────────────────────────────────────────────────
 const flagStyles = {
   contradiction: { border: "border-red-600", bg: "bg-red-950/30", dot: "bg-red-500", label: "CONTRADICTION" },
   violation:     { border: "border-orange-600", bg: "bg-orange-950/30", dot: "bg-orange-500", label: "RIGHTS VIOLATION" },
@@ -476,7 +494,7 @@ const TimelineTab = ({ caseId }) => {
           <div className="text-center max-w-md">
             <p className="text-5xl mb-4">🗺️</p>
             <p className="font-semibold text-slate-300 mb-2">Build your Case Map</p>
-            <p className="text-sm">The AI will read every uploaded document and extract all people, dates, events, contradictions, rights violations, and missing elements — organized into one view.</p>
+            <p className="text-sm">The AI reads every uploaded document and extracts all people, dates, events, contradictions, rights violations, and missing elements — organized into one clear view.</p>
             <button onClick={build} className="mt-6 px-6 py-3 bg-indigo-700 hover:bg-indigo-600 rounded-xl font-medium transition">
               🗺️ Build Case Map
             </button>
@@ -519,9 +537,7 @@ const TimelineTab = ({ caseId }) => {
                   const fs = flagStyles[ev.flag] || {};
                   return (
                     <div key={i} className={`relative pl-8 fade-in`}>
-                      {/* Timeline line */}
                       {i < mapData.timeline.length - 1 && <div className="absolute left-3 top-6 bottom-0 w-px bg-slate-700" />}
-                      {/* Dot */}
                       <div className={`absolute left-1.5 top-3 w-3 h-3 rounded-full border-2 border-slate-900 ${ev.flag ? (fs.dot || 'bg-slate-500') : 'bg-slate-600'}`} />
                       <div className={`rounded-xl border p-3 ${ev.flag ? `${fs.border} ${fs.bg}` : 'border-slate-700 bg-slate-800/50'}`}>
                         <div className="flex items-start justify-between gap-2">
@@ -641,7 +657,7 @@ const TimelineTab = ({ caseId }) => {
             {activeSection === "questions" && (
               <div className="space-y-2 fade-in">
                 <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 mb-3">
-                  <p className="text-xs text-slate-400">Unanswered questions the AI flagged as high priority for investigation.</p>
+                  <p className="text-xs text-slate-400">Unanswered questions flagged as high priority for investigation.</p>
                 </div>
                 {mapData.key_questions?.length === 0 && <p className="text-slate-500 text-sm text-center mt-8">No key questions extracted.</p>}
                 {mapData.key_questions?.map((q, i) => (
@@ -660,7 +676,7 @@ const TimelineTab = ({ caseId }) => {
   );
 };
 
-// ── Overview Tab ───────────────────────────────────────────────────────────
+// ── Overview Tab ─────────────────────────────────────────────────────────────────
 const OverviewTab = ({ caseData, onRefresh }) => {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -672,7 +688,7 @@ const OverviewTab = ({ caseData, onRefresh }) => {
     try {
       const res = await api.get(`/api/cases/${caseData.id}/brief`);
       setBrief(res.brief);
-    } catch (e) { alert("Failed to generate brief"); }
+    } catch (e) { alert("Failed to generate brief: " + e.message); }
     setLoadingBrief(false);
   };
 
@@ -739,7 +755,7 @@ const OverviewTab = ({ caseData, onRefresh }) => {
   );
 };
 
-// ── Sidebar ────────────────────────────────────────────────────────────────
+// ── Sidebar ──────────────────────────────────────────────────────────────────────────
 const Sidebar = ({ cases, selectedId, onSelect, onNew }) => (
   <div className="sidebar w-64 flex-shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col">
     <div className="p-5 border-b border-slate-800">
@@ -772,13 +788,16 @@ const Sidebar = ({ cases, selectedId, onSelect, onNew }) => (
       ))}
     </div>
 
-    <div className="p-4 border-t border-slate-800 text-xs text-slate-600 text-center">
-      Every detail matters.<br/>Every person deserves a voice.
+    <div className="p-4 border-t border-slate-800 text-xs text-slate-500 text-center space-y-1.5">
+      <p>Every detail matters. Every person deserves a voice.</p>
+      <a href="mailto:broadvocacy@gmail.com" className="text-blue-400 hover:text-blue-300 transition block font-medium">
+        broadvocacy@gmail.com
+      </a>
     </div>
   </div>
 );
 
-// ── Main App ───────────────────────────────────────────────────────────────
+// ── Main App ─────────────────────────────────────────────────────────────────────────
 const App = () => {
   const [cases, setCases] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -824,15 +843,19 @@ const App = () => {
             <div>
               <p className="text-6xl mb-6">⚖️</p>
               <h2 className="text-2xl font-bold text-white mb-3">BROadvocacy AI</h2>
-              <p className="text-slate-400 max-w-md mb-2">Your AI co-counsel for criminal defense advocacy.</p>
+              <p className="text-slate-300 max-w-md mb-2 text-base">AI-powered criminal defense advocacy — for the people who need it most.</p>
               <p className="text-slate-500 max-w-md text-sm mb-8">
-                Upload police reports, FOIA responses, court documents, and statements.
-                The AI analyzes everything — flags issues, spots inconsistencies, and helps build strategy.
+                Upload police reports, FOIA responses, court documents, and witness statements.
+                The AI scans everything — flags contradictions, spots rights violations, and helps you build your defense strategy.
               </p>
               <button onClick={() => setShowNew(true)}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium transition">
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-medium transition text-white">
                 + Open Your First Case
               </button>
+              <p className="mt-6 text-xs text-slate-600">
+                Questions? Reach us at{" "}
+                <a href="mailto:broadvocacy@gmail.com" className="text-blue-500 hover:text-blue-400 underline">broadvocacy@gmail.com</a>
+              </p>
             </div>
           </div>
         ) : (
